@@ -1,0 +1,192 @@
+based on the tree dir/files structuere "tree_image.txt", all .dcm files must to be renamed and move them in a single new dir called "img_repo", following the  indicated logic and rules.
+
+the logic for naming each file is:
+6 digits long
+the first 4 digits are id correlative number starting from 1116
+the last 2 digits are the correlative number for each .dcm file found
+
+The tree structure has main dirs that has different nested dirs in a correlative name values logic, from which the first nested sub-dirs are important.
+
+as example, for this first record, it should be transformed as follow:
+
+├── 0047140
+│ └── E15047136
+│     └── DX
+│         ├── 1___AP_KNEES_BI_T_STANDING
+│         │ └── 1352438653.dcm
+│         ├── 2__PA_FLEXION_B_T_STANDING
+│         │ └── 1352438675.dcm
+│         ├── 7__TABLE_LAT_KNEE
+│         │ └── 1352438686.dcm
+│         └── 9__SKYLINE
+│             └── 1352438689.dcm
+
+img_repo
+├── 111601.dcm
+├── 111602.dcm
+├── 111603.dcm
+├── 111604.dcm
+
+since this dir has 4 dcm files nested inside.
+
+and then the following files of the next dirs should be addded in a correlative fashion like:
+
+img_repo
+├── 111601.dcm
+├── 111602.dcm
+├── 111603.dcm
+├── 111604.dcm
+├── 111701.dcm
+├── 111702.dcm
+├── ... and so on...
+
+Each "main" dir can has 1 or 2 first sub-dirs, named with alfa-numerical values, like:
+
+├── 0408991
+│ ├── E10809926
+│ │ ├── ...
+│ │ │ └── ....dcm
+│ │ └── ...
+│ │     └── ...
+│ │         └── ....dcm
+│ └── E11193722
+│     └── ...
+│         ├── ...
+│         │ └── ....dcm
+│         ├── ...
+│         │ └── ....dcm
+│         └── ...
+│             └── ....dcm
+
+
+If there is only one, proceed like before renaming logic given earlier above. If there is 2, proceed as follow:
+
+for the lower alfa-numerical value in the name of the first sub-dir, proceed just like before but adding an "a" character at the end of the new name, like:
+
+img_repo
+├── 111901a.dcm
+├── 111902a.dcm
+
+for the bigest alfa-numerical value in the name of the first sub-dir, proceed just like before starting from 01 in a correlative fashion for each nested dcm file that it has, like:
+
+img_repo
+├── 111901.dcm
+├── 111902.dcm
+
+as example, for this dir record, it should be transformed as follow:
+
+├── 0408991
+│ ├── E10809926
+│ │ ├── DX
+│ │ │ └── 1547657505_Lower_limbs
+│ │ │     └── 1352115302.dcm
+│ │ └── SR
+│ │     └── 1__1
+│ │         └── 1352114714.dcm
+│ └── E11193722
+│     └── DX
+│         ├── 10_SKYLINE
+│         │ └── 1353124558.dcm
+│         ├── 2___AP_KNEES_BI_T_STANDING
+│         │ └── 1353124551.dcm
+│         └── 8__TABLE_LAT_KNEE
+│             └── 1353124556.dcm
+
+E10809926 is the lowest name value
+E11193722 is the bigest name value
+then its files should be renamed like:
+
+img_repo
+├── ... (previous named files)
+├── 111901a.dcm
+├── 111902a.dcm
+├── 111901.dcm
+├── 111902.dcm
+├── 111903.dcm
+├── ... and so on...
+
+since it has 2 dcm file in the lower dir value of its first sub-dir, and it has 3 dcm files in the bigest.
+
+The main fixed path where this tree structure is located is:
+/Volumes/MGB-CRE3-IRB2024P000937
+
+create the new img_repo dir in the current pwd.
+
+In summary the previous job must to do the following:
+
+Read the directory tree structure from /Volumes/MGB-CRE3-IRB2024P000937
+Create a new img_repo directory in the current working directory
+Move all .dcm files to this new directory with a specific naming pattern:
+
+6 digits long
+First 4 digits starting from 1116 and incrementing for each main directory
+Last 2 digits as correlative numbers for each file (01, 02, etc.)
+For directories with two first-level subdirectories, use an 'a' suffix for files from the lower-value subdirectory.
+
+Sorts all main directories to ensure consistent processing
+
+For each main directory:
+
+Gets all first-level subdirectories
+If there's only one subdirectory, processes all .dcm files with the current counter
+If there are multiple subdirectories, sorts them and processes the lowest one with 'a' suffix and the highest one without suffix
+Increments the counter for the next main directory
+
+For each subdirectory being processed:
+
+Finds all .dcm files in the subdirectory and its subdirectories
+Sorts the files for consistent processing
+Copies each file to the destination with the new name according to the pattern
+
+The job must to create a new img_repo directory in the current working directory and copies all .dcm files with their new names to this directory.
+
+
+THEN, EACH PREVIOUS FILES NAMES (saved on the img_repo dir) MUST TO BE ADDED TO THE HALS_MRN COLUMN IN THE CSV DATA FILE
+
+the csv data file as the structure as shown in hals_dataset.csv file
+
+the Accession_Number has the first main sub-dir of the original repo tree structure.
+
+then, the created .dcm new file's name must to be added into the HALS MRN column accordenly
+
+in the case that each main sub-dir has more that one dcm file, the job must to copy the entire raw appending its correponding file name in each new raw.
+
+for example, for the record:
+
+EMPI,Date_of_Surgery,Accession_Number,HALS_MRN,Sex,Age,BMI,Side,Type_of_TKA,Patellar_Replacement,Preoperative_KOOS-PS,1-Year_Postop_KOOS-PS
+100055527,4/14/17,E15047136,111601,1,75,27,1,1,1,42.1,81.4
+
+that corresponds to the original path:
+
+├── 0047140
+│ └── E15047136
+│     └── DX
+│         ├── 1___AP_KNEES_BI_T_STANDING
+│         │ └── 1352438653.dcm
+│         ├── 2__PA_FLEXION_B_T_STANDING
+│         │ └── 1352438675.dcm
+│         ├── 7__TABLE_LAT_KNEE
+│         │ └── 1352438686.dcm
+│         └── 9__SKYLINE
+│             └── 1352438689.dcm
+
+that was renamed to:
+
+img_repo
+├── 111601.dcm
+├── 111602.dcm
+├── 111603.dcm
+├── 111604.dcm
+├── ... and so on...
+
+the new csv file should append raws with its new names like:
+
+MPI,Date_of_Surgery,Accession_Number,HALS_MRN,Sex,Age,BMI,Side,Type_of_TKA,Patellar_Replacement,Preoperative_KOOS_PS,1_Year_Postop_KOOS_PS
+100055527,4/14/17,E15047136,111601,1,75,27,1,1,1,42.1,81.4
+100055527,4/14/17,E15047136,111602,1,75,27,1,1,1,42.1,81.4
+100055527,4/14/17,E15047136,111603,1,75,27,1,1,1,42.1,81.4
+100055527,4/14/17,E15047136,111604,1,75,27,1,1,1,42.1,81.4
+
+preserving the entire data for the raw just appending its new file name in the HALS_MRN column.
+
+the same for records that has dcm file names with the 'a' suffix

@@ -1,0 +1,8 @@
+https://monai.io/
+
+https://pypi.org/project/torchxrayvision/
+https://torchxrayvision.readthedocs.io/en/latest/models.html
+https://mlmed.org/torchxrayvision/
+https://github.com/mlmed/torchxrayvision
+https://huggingface.co/torchxrayvision
+https://arxiv.org/abs/2111.00595
