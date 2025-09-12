@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/visualization/plot_utils.py
 """
 Visualization utilities for KOOS-PS prediction model.
 

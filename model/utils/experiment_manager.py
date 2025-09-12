@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/utils/experiment_manager.py
 """
 Experiment management utilities for tracking training iterations.
 

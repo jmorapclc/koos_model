@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# data/config.py
 """
 Configuration file for DCM File Processor
 

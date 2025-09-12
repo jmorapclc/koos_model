@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/models/cnn_model.py
 """
 CNN model architecture for KOOS-PS prediction.
 

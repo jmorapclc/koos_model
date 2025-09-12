@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/config/config.py
 """
 Configuration file for KOOS-PS Prediction CNN Model
 

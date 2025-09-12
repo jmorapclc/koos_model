@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# model/check_device.py
 """
 Device detection and capability check script.
 

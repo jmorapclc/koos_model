@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/utils/helpers.py
 """
 Utility functions for KOOS-PS prediction model.
 

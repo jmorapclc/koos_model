@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# model/test_setup.py
 """
 Test script to validate model setup and configuration.
 

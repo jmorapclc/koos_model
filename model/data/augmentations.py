@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/data/augmentations.py
 """
 Data augmentation pipelines for medical X-ray images.
 

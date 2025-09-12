@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# model/training/trainer.py
 """
 Training module for KOOS-PS prediction model.
 
