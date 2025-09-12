@@ -176,7 +176,7 @@ def save_config(config: Any, filepath: str):
     config_dict = config.to_dict() if hasattr(config, 'to_dict') else config.__dict__
     
     with open(filepath, 'w') as f:
-        if filepath.endswith('.json'):
+        if str(filepath).endswith('.json'):
             json.dump(config_dict, f, indent=2)
         elif filepath.endswith('.yaml') or filepath.endswith('.yml'):
             yaml.dump(config_dict, f, default_flow_style=False)
@@ -196,7 +196,7 @@ def load_config(filepath: str) -> Dict[str, Any]:
         Configuration dictionary
     """
     with open(filepath, 'r') as f:
-        if filepath.endswith('.json'):
+        if str(filepath).endswith('.json'):
             config = json.load(f)
         elif filepath.endswith('.yaml') or filepath.endswith('.yml'):
             config = yaml.safe_load(f)
@@ -423,7 +423,22 @@ def save_model_artifacts(
     
     # Save metrics
     with open(save_dir / 'metrics.json', 'w') as f:
-        json.dump(metrics, f, indent=2)
+        # Convert numpy types to Python types for JSON serialization
+        def convert_numpy_types(obj):
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {key: convert_numpy_types(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            return obj
+        
+        metrics_serializable = convert_numpy_types(metrics)
+        json.dump(metrics_serializable, f, indent=2)
     
     # Save model summary
     model_summary = get_model_summary(model)

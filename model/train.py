@@ -248,23 +248,26 @@ def save_results(
     # Save evaluation results
     import json
     with open(results_dir / "evaluation_results.json", 'w') as f:
-        # Convert numpy arrays to lists for JSON serialization
-        eval_results_serializable = {}
-        for key, value in evaluation_results.items():
-            if isinstance(value, np.ndarray):
-                eval_results_serializable[key] = value.tolist()
-            else:
-                eval_results_serializable[key] = value
+        # Convert numpy types to Python types for JSON serialization
+        def convert_numpy_types(obj):
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {key: convert_numpy_types(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            return obj
+        
+        eval_results_serializable = convert_numpy_types(evaluation_results)
         json.dump(eval_results_serializable, f, indent=2)
     
     # Save training results
     with open(results_dir / "training_results.json", 'w') as f:
-        training_results_serializable = {}
-        for key, value in training_results.items():
-            if isinstance(value, np.ndarray):
-                training_results_serializable[key] = value.tolist()
-            else:
-                training_results_serializable[key] = value
+        training_results_serializable = convert_numpy_types(training_results)
         json.dump(training_results_serializable, f, indent=2)
     
     # Save experiment metadata
@@ -301,7 +304,9 @@ def main():
     
     # Override with command line arguments
     if args.data_dir:
-        config.data.image_dir = os.path.join(args.data_dir, 'rx')
+        # Use the configured image directory name from config, not hardcoded 'rx'
+        image_dir_name = os.path.basename(config.data.image_dir)
+        config.data.image_dir = os.path.join(args.data_dir, image_dir_name)
         config.data.csv_file = os.path.join(args.data_dir, 'HALS_Dataset_v1.csv')
     if args.output_dir:
         config.data.output_dir = args.output_dir

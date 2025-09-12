@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 import torch
+import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
@@ -336,7 +337,25 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         # Save metadata
         metadata_file = self.experiment_dir / 'experiment_metadata.json'
         with open(metadata_file, 'w') as f:
-            json.dump(self.metadata, f, indent=2)
+            # Convert numpy types to Python types for JSON serialization
+            def convert_numpy_types(obj):
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {key: convert_numpy_types(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_numpy_types(item) for item in obj]
+                elif hasattr(obj, '__dict__'):
+                    # Handle objects with __dict__ (like Sequential, etc.)
+                    return str(obj)
+                return obj
+            
+            metadata_serializable = convert_numpy_types(self.metadata)
+            json.dump(metadata_serializable, f, indent=2)
         
         logger.info(f"Experiment metadata saved to {metadata_file}")
     

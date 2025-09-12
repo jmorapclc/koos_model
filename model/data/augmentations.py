@@ -59,20 +59,19 @@ class MedicalImageAugmentations:
                     limit=self.aug_config.rotation_degrees,
                     p=0.5,
                     border_mode=cv2.BORDER_CONSTANT,
-                    value=0
+                    fill_value=0
                 )
             )
         
         # Translation and scaling
         if self.aug_config.translation_ratio > 0 or self.aug_config.scale_ratio > 0:
             transforms.append(
-                A.ShiftScaleRotate(
-                    shift_limit=self.aug_config.translation_ratio,
-                    scale_limit=self.aug_config.scale_ratio,
-                    rotate_limit=0,
+                A.Affine(
+                    translate_percent=self.aug_config.translation_ratio,
+                    scale=(1-self.aug_config.scale_ratio, 1+self.aug_config.scale_ratio),
                     p=0.5,
-                    border_mode=cv2.BORDER_CONSTANT,
-                    value=0
+                    mode=cv2.BORDER_CONSTANT,
+                    cval=0
                 )
             )
         
@@ -84,8 +83,8 @@ class MedicalImageAugmentations:
                     sigma=self.aug_config.elastic_sigma,
                     alpha_affine=50,
                     p=0.3,
-                    border_mode=cv2.BORDER_CONSTANT,
-                    value=0
+                    mode=cv2.BORDER_CONSTANT,
+                    cval=0
                 )
             )
         

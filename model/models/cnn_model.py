@@ -201,23 +201,29 @@ class KOOSPredictionModel(nn.Module):
         # Get feature dimension from backbone
         self.feature_dim = self._get_feature_dim()
         
-        # Attention module
+        # Attention module (only for spatial attention on feature maps)
         if self.model_config.use_attention:
+            # For DenseNet-121, features have 1024 channels
             self.attention = AttentionModule(self.feature_dim)
         else:
             self.attention = None
         
+        # Get the flattened feature dimension for metadata fusion
+        self.flattened_feature_dim = self._get_flattened_feature_dim()
+        
         # Metadata fusion
         if self.model_config.use_metadata_fusion:
             self.metadata_fusion = MetadataFusion(
-                image_features_dim=self.feature_dim,
+                image_features_dim=self.flattened_feature_dim,
                 metadata_dim=self.model_config.num_metadata_features,
                 hidden_dim=self.model_config.hidden_dim,
                 fusion_type="concat"
             )
             fusion_output_dim = self.model_config.hidden_dim
         else:
-            fusion_output_dim = self.feature_dim
+            # When metadata fusion is disabled, use the actual feature dimension
+            # This is the dimension after global average pooling
+            fusion_output_dim = self.flattened_feature_dim
         
         # Skip connections
         if self.model_config.use_skip_connections:
@@ -225,7 +231,7 @@ class KOOSPredictionModel(nn.Module):
                 self.model_config.num_metadata_features,
                 fusion_output_dim
             )
-            final_input_dim = fusion_output_dim * 2
+            final_input_dim = fusion_output_dim + fusion_output_dim  # Concatenate
         else:
             final_input_dim = fusion_output_dim
         
@@ -272,8 +278,8 @@ class KOOSPredictionModel(nn.Module):
             
         elif backbone_name == "efficientnet_b0":
             try:
-                import torchvision.models as models
-                model = models.efficientnet_b0(pretrained=self.model_config.pretrained)
+                import torchvision.models as efficientnet_models
+                model = efficientnet_models.efficientnet_b0(pretrained=self.model_config.pretrained)
                 # Remove the classifier
                 model = nn.Sequential(*list(model.features.children()))
             except ImportError:
@@ -294,15 +300,36 @@ class KOOSPredictionModel(nn.Module):
     
     def _get_feature_dim(self) -> int:
         """
-        Get the feature dimension from the backbone.
+        Get the feature dimension from the backbone (number of channels).
         
         Returns:
-            Feature dimension
+            Number of channels in feature maps
         """
         # Create a dummy input to get feature dimension
         dummy_input = torch.randn(1, 3, 224, 224)
         with torch.no_grad():
             features = self.backbone(dummy_input)
+            # For DenseNet, features are [batch, channels, height, width]
+            # We need the number of channels for attention
+            if len(features.shape) == 4:  # [B, C, H, W]
+                return features.size(1)  # Return number of channels
+            else:  # [B, features]
+                return features.size(1)
+    
+    def _get_flattened_feature_dim(self) -> int:
+        """
+        Get the flattened feature dimension from the backbone after global average pooling.
+        
+        Returns:
+            Flattened feature dimension
+        """
+        # Create a dummy input to get feature dimension
+        dummy_input = torch.randn(1, 3, 224, 224)
+        with torch.no_grad():
+            features = self.backbone(dummy_input)
+            # Apply global average pooling first
+            features = F.adaptive_avg_pool2d(features, (1, 1))
+            # Return the flattened size
             return features.view(features.size(0), -1).size(1)
     
     def _initialize_weights(self):
@@ -351,13 +378,14 @@ class KOOSPredictionModel(nn.Module):
         features = features.view(features.size(0), -1)  # [batch_size, feature_dim]
         
         # Fuse with metadata
-        if self.model_config.use_metadata_fusion:
+        if self.model_config.use_metadata_fusion and hasattr(self, 'metadata_fusion'):
             fused_features = self.metadata_fusion(features, metadata)
         else:
+            # When metadata fusion is disabled, features are already the correct size
             fused_features = features
         
         # Skip connection
-        if self.model_config.use_skip_connections:
+        if self.model_config.use_skip_connections and hasattr(self, 'skip_connection'):
             skip_features = self.skip_connection(metadata)
             fused_features = torch.cat([fused_features, skip_features], dim=1)
         
@@ -411,7 +439,7 @@ class ModelFactory:
         Returns:
             Model instance
         """
-        model_type = config.model.get('type', 'koos_prediction')
+        model_type = getattr(config.model, 'type', 'koos_prediction')
         
         if model_type == 'koos_prediction':
             return KOOSPredictionModel(config)

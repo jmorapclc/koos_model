@@ -69,7 +69,8 @@ class KOOSDataset(Dataset):
     def _load_metadata(self) -> pd.DataFrame:
         """Load metadata from CSV file."""
         try:
-            df = pd.read_csv(self.csv_file)
+            # Load CSV with HALS_MRN as string to prevent float conversion
+            df = pd.read_csv(self.csv_file, dtype={'HALS_MRN': str})
             logger.info(f"Loaded metadata with {len(df)} rows and columns: {list(df.columns)}")
             return df
         except Exception as e:

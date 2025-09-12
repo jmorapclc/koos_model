@@ -365,7 +365,7 @@ class ModelEvaluator:
         }
         
         # Save predictions if requested
-        if save_predictions and self.metrics_config.save_predictions:
+        if save_predictions and self.config.metrics.save_predictions:
             self._save_predictions(results)
         
         return results

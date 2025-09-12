@@ -98,7 +98,7 @@ config = Config()
 # Create data module
 data_module = KOOSDataModule(
     csv_file="data/HALS_Dataset_v1.csv",
-    image_dir="data/rx",
+    image_dir="data/img_repo",
     config=config
 )
 
