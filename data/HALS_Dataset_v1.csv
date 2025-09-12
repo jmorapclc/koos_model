@@ -1,4 +1,4 @@
-﻿HALS MRN,Sex,Age,BMI,Side,Type of TKA,Patellar Replacement,Preoperative KOOS-PS,1-Year Postoperative KOOS-PS
+﻿HALS_MRN,Sex,Age,BMI,Side,Type_of_TKA,Patellar_Replacement,Preoperative_KOOS-PS,1-Year_Postop_KOOS-PS
 100101,1,90,27,1,1,1,42.1,81.4
 100102,1,90,27,1,1,1,42.1,81.4
 100201,0,72,25,0,1,1,59.7,51.5
