@@ -19,6 +19,7 @@ from data.dataset import KOOSDataset
 from data.augmentations import create_augmentation_pipelines
 from models.cnn_model import ModelFactory
 from utils.helpers import set_seed, get_device, calculate_model_size
+from utils.experiment_manager import ExperimentManager
 
 def test_configuration():
     """Test configuration loading and validation."""
@@ -177,6 +178,90 @@ def test_evaluation_components(config):
         print(f"✗ Evaluation components failed: {e}")
         return False
 
+def test_experiment_manager(config):
+    """Test experiment manager."""
+    print("\nTesting experiment manager...")
+    
+    try:
+        # Create experiment manager
+        experiment_manager = ExperimentManager("test_outputs")
+        print(f"✓ Experiment manager created")
+        print(f"  - Experiment ID: {experiment_manager.experiment_id}")
+        print(f"  - Experiment directory: {experiment_manager.get_experiment_dir()}")
+        
+        # Test directory structure
+        assert experiment_manager.get_model_artifacts_dir().exists()
+        assert experiment_manager.get_evaluation_plots_dir().exists()
+        assert experiment_manager.get_results_dir().exists()
+        assert experiment_manager.get_tensorboard_dir().exists()
+        assert experiment_manager.get_logs_dir().exists()
+        print(f"✓ Directory structure created")
+        
+        # Test system info
+        system_info = experiment_manager.get_system_info()
+        print(f"  - System info collected: {len(system_info)} fields")
+        
+        # Cleanup test directory
+        import shutil
+        shutil.rmtree("test_outputs", ignore_errors=True)
+        print(f"✓ Test cleanup completed")
+        
+        return True
+    except Exception as e:
+        print(f"✗ Experiment manager failed: {e}")
+        return False
+
+def test_device_detection():
+    """Test device detection and optimization."""
+    print("\nTesting device detection...")
+    
+    try:
+        from utils.helpers import get_device, get_device_info, optimize_for_device
+        
+        # Test device detection
+        device = get_device()
+        print(f"✓ Device detected: {device}")
+        
+        # Test device info
+        device_info = get_device_info()
+        print(f"  - Device type: {device_info['device_type']}")
+        print(f"  - Device name: {device_info['device_name']}")
+        print(f"  - CUDA available: {device_info['cuda_available']}")
+        print(f"  - MPS available: {device_info['mps_available']}")
+        
+        # Test optimizations
+        optimizations = optimize_for_device(device)
+        print(f"  - Optimizations: {len(optimizations)} settings")
+        
+        # Test basic tensor operations
+        test_tensor = torch.randn(10, 10).to(device)
+        result = torch.matmul(test_tensor, test_tensor.T)
+        print(f"✓ Tensor operations successful on {device}")
+        
+        # Test mixed precision if available
+        if device_info['device_type'] == 'cuda' and torch.cuda.is_available():
+            try:
+                with torch.cuda.amp.autocast():
+                    test_tensor = torch.randn(10, 10).to(device)
+                    result = torch.matmul(test_tensor, test_tensor.T)
+                print(f"✓ CUDA mixed precision test successful")
+            except Exception as e:
+                print(f"✗ CUDA mixed precision test failed: {e}")
+                
+        elif device_info['device_type'] == 'mps' and torch.backends.mps.is_available():
+            try:
+                with torch.autocast(device_type='mps', dtype=torch.float16):
+                    test_tensor = torch.randn(10, 10).to(device)
+                    result = torch.matmul(test_tensor, test_tensor.T)
+                print(f"✓ MPS mixed precision test successful")
+            except Exception as e:
+                print(f"✗ MPS mixed precision test failed: {e}")
+        
+        return True
+    except Exception as e:
+        print(f"✗ Device detection failed: {e}")
+        return False
+
 def main():
     """Run all tests."""
     print("=" * 60)
@@ -207,6 +292,12 @@ def main():
     # Test evaluation components
     eval_ok = test_evaluation_components(config)
     
+    # Test experiment manager
+    exp_ok = test_experiment_manager(config)
+    
+    # Test device detection
+    device_ok = test_device_detection()
+    
     # Summary
     print("\n" + "=" * 60)
     print("Test Summary")
@@ -218,7 +309,9 @@ def main():
         ("Augmentations", aug_ok),
         ("Model Creation", model_ok),
         ("Training Components", training_ok),
-        ("Evaluation Components", eval_ok)
+        ("Evaluation Components", eval_ok),
+        ("Experiment Manager", exp_ok),
+        ("Device Detection", device_ok)
     ]
     
     all_passed = True

@@ -25,9 +25,10 @@ from models.cnn_model import ModelFactory
 from training.trainer import ModelTrainer
 from metrics.evaluation import ModelEvaluator
 from utils.helpers import (
-    set_seed, get_device, save_model_artifacts, 
-    plot_training_history, calculate_model_size, load_config
+    set_seed, get_device, get_device_info, optimize_for_device, 
+    save_model_artifacts, plot_training_history, calculate_model_size, load_config
 )
+from utils.experiment_manager import ExperimentManager
 
 def setup_logging(config: Config) -> logging.Logger:
     """
@@ -58,12 +59,13 @@ def setup_logging(config: Config) -> logging.Logger:
     
     return logger
 
-def load_data(config: Config) -> KOOSDataModule:
+def load_data(config: Config, device_optimizations: dict = None) -> KOOSDataModule:
     """
-    Load and prepare data.
+    Load and prepare data with device-specific optimizations.
     
     Args:
         config: Configuration object
+        device_optimizations: Device-specific optimization settings
         
     Returns:
         Data module
@@ -116,15 +118,19 @@ def create_model(config: Config) -> torch.nn.Module:
 def train_model(
     model: torch.nn.Module,
     data_module: KOOSDataModule,
-    config: Config
+    config: Config,
+    experiment_manager: ExperimentManager,
+    device_optimizations: dict = None
 ) -> Dict[str, Any]:
     """
-    Train the model.
+    Train the model with device-specific optimizations.
     
     Args:
         model: Model to train
         data_module: Data module
         config: Configuration object
+        experiment_manager: Experiment manager for output directories
+        device_optimizations: Device-specific optimization settings
         
     Returns:
         Training results
@@ -132,11 +138,11 @@ def train_model(
     logger = logging.getLogger(__name__)
     logger.info("Starting model training...")
     
-    # Get data loaders
-    train_loader, val_loader, test_loader = data_module.get_dataloaders()
+    # Get data loaders with device optimizations
+    train_loader, val_loader, test_loader = data_module.get_dataloaders(device_optimizations)
     
-    # Create trainer
-    trainer = ModelTrainer(config)
+    # Create trainer with experiment manager
+    trainer = ModelTrainer(config, experiment_manager)
     
     # Setup training
     trainer.setup_training(model, train_loader, val_loader)
@@ -153,15 +159,19 @@ def train_model(
 def evaluate_model(
     model: torch.nn.Module,
     data_module: KOOSDataModule,
-    config: Config
+    config: Config,
+    experiment_manager: ExperimentManager,
+    device_optimizations: dict = None
 ) -> Dict[str, Any]:
     """
-    Evaluate the trained model.
+    Evaluate the trained model with device-specific optimizations.
     
     Args:
         model: Trained model
         data_module: Data module
         config: Configuration object
+        experiment_manager: Experiment manager for output directories
+        device_optimizations: Device-specific optimization settings
         
     Returns:
         Evaluation results
@@ -169,20 +179,18 @@ def evaluate_model(
     logger = logging.getLogger(__name__)
     logger.info("Evaluating model...")
     
-    # Get data loaders
-    train_loader, val_loader, test_loader = data_module.get_dataloaders()
+    # Get data loaders with device optimizations
+    train_loader, val_loader, test_loader = data_module.get_dataloaders(device_optimizations)
     
-    # Create evaluator
-    evaluator = ModelEvaluator(config)
+    # Create evaluator with experiment manager
+    evaluator = ModelEvaluator(config, experiment_manager)
     
     # Evaluate on test set
     device = get_device()
     test_results = evaluator.evaluate_model(model, test_loader, device)
     
     # Create evaluation plots
-    plots_dir = Path(config.data.output_dir) / "evaluation_plots"
-    plots_dir.mkdir(parents=True, exist_ok=True)
-    
+    plots_dir = experiment_manager.get_evaluation_plots_dir()
     evaluation_plots = evaluator.create_evaluation_plots(
         test_results, 
         save_path=str(plots_dir)
@@ -195,7 +203,8 @@ def save_results(
     model: torch.nn.Module,
     config: Config,
     training_results: Dict[str, Any],
-    evaluation_results: Dict[str, Any]
+    evaluation_results: Dict[str, Any],
+    experiment_manager: ExperimentManager
 ):
     """
     Save all training and evaluation results.
@@ -205,6 +214,7 @@ def save_results(
         config: Configuration object
         training_results: Training results
         evaluation_results: Evaluation results
+        experiment_manager: Experiment manager for output directories
     """
     logger = logging.getLogger(__name__)
     logger.info("Saving results...")
@@ -213,7 +223,7 @@ def save_results(
     metrics = evaluation_results['metrics']
     
     # Save model artifacts
-    artifacts_dir = Path(config.data.output_dir) / "model_artifacts"
+    artifacts_dir = experiment_manager.get_model_artifacts_dir()
     save_model_artifacts(
         model=model,
         config=config,
@@ -222,9 +232,18 @@ def save_results(
         save_dir=str(artifacts_dir)
     )
     
+    # Create comprehensive model summary
+    training_time = training_results.get('total_time', 0)
+    model_summary = experiment_manager.create_model_summary(
+        model, config, training_time
+    )
+    
+    # Save model summary
+    with open(artifacts_dir / 'model_summary.txt', 'w') as f:
+        f.write(model_summary)
+    
     # Save detailed results
-    results_dir = Path(config.data.output_dir) / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
+    results_dir = experiment_manager.get_results_dir()
     
     # Save evaluation results
     import json
@@ -248,7 +267,12 @@ def save_results(
                 training_results_serializable[key] = value
         json.dump(training_results_serializable, f, indent=2)
     
-    logger.info(f"Results saved to {config.data.output_dir}")
+    # Save experiment metadata
+    experiment_manager.save_experiment_metadata(
+        config, model, training_time
+    )
+    
+    logger.info(f"Results saved to {experiment_manager.get_experiment_dir()}")
 
 def main():
     """Main training function."""
@@ -297,23 +321,54 @@ def main():
     logger = setup_logging(config)
     
     try:
-        # Load data
-        data_module = load_data(config)
+        # Detect device and get optimizations
+        device = get_device()
+        device_info = get_device_info()
+        device_optimizations = optimize_for_device(device)
+        
+        logger.info("="*60)
+        logger.info("DEVICE DETECTION AND OPTIMIZATION")
+        logger.info("="*60)
+        logger.info(f"Device Type: {device_info['device_type']}")
+        logger.info(f"Device Name: {device_info['device_name']}")
+        logger.info(f"CUDA Available: {device_info['cuda_available']}")
+        logger.info(f"MPS Available: {device_info['mps_available']}")
+        
+        if device_info['device_type'] == 'cuda':
+            logger.info(f"GPU Memory: {device_info['memory_total'] / 1024**3:.2f} GB")
+            logger.info(f"Compute Capability: {device_info['compute_capability']}")
+        elif device_info['device_type'] == 'mps':
+            logger.info("Apple Silicon M-series GPU detected")
+        
+        logger.info("Device Optimizations Applied:")
+        for key, value in device_optimizations.items():
+            logger.info(f"  {key}: {value}")
+        logger.info("="*60)
+        
+        # Create experiment manager
+        experiment_manager = ExperimentManager(config.data.output_dir)
+        logger.info(f"Created experiment: {experiment_manager.experiment_id}")
+        
+        # Load data with device optimizations
+        data_module = load_data(config, device_optimizations)
         
         # Create model
         model = create_model(config)
         
-        # Train model
-        training_results = train_model(model, data_module, config)
+        # Train model with device optimizations
+        training_results = train_model(model, data_module, config, experiment_manager, device_optimizations)
         
-        # Evaluate model
-        evaluation_results = evaluate_model(model, data_module, config)
+        # Evaluate model with device optimizations
+        evaluation_results = evaluate_model(model, data_module, config, experiment_manager, device_optimizations)
         
         # Save results
-        save_results(model, config, training_results, evaluation_results)
+        save_results(model, config, training_results, evaluation_results, experiment_manager)
         
         # Print final metrics
         logger.info("Training completed successfully!")
+        logger.info(f"Experiment ID: {experiment_manager.experiment_id}")
+        logger.info(f"Experiment directory: {experiment_manager.get_experiment_dir()}")
+        logger.info(f"Device used: {device_info['device_name']}")
         logger.info(f"Best validation loss: {training_results['best_val_loss']:.4f}")
         logger.info(f"Test MAE: {evaluation_results['metrics']['mae']:.4f}")
         logger.info(f"Test R²: {evaluation_results['metrics']['r2']:.4f}")

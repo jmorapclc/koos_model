@@ -209,15 +209,11 @@ class Config:
     
     def _create_directories(self):
         """Create necessary output directories."""
-        directories = [
-            self.data.output_dir,
-            self.logging.checkpoint_dir,
-            self.logging.tensorboard_dir,
-            os.path.dirname(self.logging.log_file)
-        ]
+        # Create base output directory
+        os.makedirs(self.data.output_dir, exist_ok=True)
         
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
+        # Note: Specific iteration directories will be created during training
+        # This ensures we don't create empty timestamped directories
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""

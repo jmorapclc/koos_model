@@ -130,14 +130,16 @@ class ModelTrainer:
     Comprehensive model trainer with advanced features.
     """
     
-    def __init__(self, config: Any):
+    def __init__(self, config: Any, experiment_manager=None):
         """
         Initialize trainer.
         
         Args:
             config: Configuration object
+            experiment_manager: Experiment manager for output directories
         """
         self.config = config
+        self.experiment_manager = experiment_manager
         self.device = self._setup_device()
         self.model = None
         self.optimizer = None
@@ -174,16 +176,25 @@ class ModelTrainer:
     
     def _setup_logging(self):
         """Setup logging and monitoring."""
+        # Use experiment manager directories if available
+        if self.experiment_manager:
+            tensorboard_dir = self.experiment_manager.get_tensorboard_dir()
+            log_file = self.experiment_manager.get_logs_dir() / 'training.log'
+        else:
+            tensorboard_dir = self.config.logging.tensorboard_dir
+            log_file = self.config.logging.log_file
+        
         # TensorBoard
         if self.config.logging.use_tensorboard:
-            self.writer = SummaryWriter(self.config.logging.tensorboard_dir)
+            self.writer = SummaryWriter(str(tensorboard_dir))
         
         # Weights & Biases
         if self.config.logging.use_wandb:
             wandb.init(
                 project=self.config.logging.wandb_project,
                 entity=self.config.logging.wandb_entity,
-                config=self.config.to_dict()
+                config=self.config.to_dict(),
+                name=self.experiment_manager.experiment_id if self.experiment_manager else None
             )
     
     def _create_optimizer(self, model: nn.Module) -> optim.Optimizer:
@@ -267,7 +278,16 @@ class ModelTrainer:
         
         # Mixed precision scaler
         if self.config.system.mixed_precision:
-            self.scaler = torch.cuda.amp.GradScaler()
+            if self.device.type == 'cuda':
+                self.scaler = torch.cuda.amp.GradScaler()
+                logger.info("Mixed precision training enabled (CUDA)")
+            elif self.device.type == 'mps':
+                # MPS supports mixed precision but doesn't need GradScaler
+                self.scaler = None
+                logger.info("Mixed precision training enabled (MPS)")
+            else:
+                self.scaler = None
+                logger.info("Mixed precision not supported on CPU")
         else:
             self.scaler = None
         
@@ -302,6 +322,7 @@ class ModelTrainer:
             
             # Forward pass with mixed precision
             if self.scaler is not None:
+                # CUDA mixed precision with GradScaler
                 with torch.cuda.amp.autocast():
                     outputs = self.model(images, metadata)
                     predictions = outputs['predictions']
@@ -320,7 +341,26 @@ class ModelTrainer:
                 
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
+            elif self.device.type == 'mps' and self.config.system.mixed_precision:
+                # MPS mixed precision (no GradScaler needed)
+                with torch.autocast(device_type='mps', dtype=torch.float16):
+                    outputs = self.model(images, metadata)
+                    predictions = outputs['predictions']
+                    loss = self.criterion(predictions, targets)
+                
+                # Backward pass
+                loss.backward()
+                
+                # Gradient clipping
+                if self.config.training.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), 
+                        self.config.training.max_grad_norm
+                    )
+                
+                self.optimizer.step()
             else:
+                # Standard precision training
                 outputs = self.model(images, metadata)
                 predictions = outputs['predictions']
                 loss = self.criterion(predictions, targets)
@@ -385,11 +425,19 @@ class ModelTrainer:
                 
                 # Forward pass
                 if self.scaler is not None:
+                    # CUDA mixed precision
                     with torch.cuda.amp.autocast():
                         outputs = self.model(images, metadata)
                         predictions = outputs['predictions']
                         loss = self.criterion(predictions, targets)
+                elif self.device.type == 'mps' and self.config.system.mixed_precision:
+                    # MPS mixed precision
+                    with torch.autocast(device_type='mps', dtype=torch.float16):
+                        outputs = self.model(images, metadata)
+                        predictions = outputs['predictions']
+                        loss = self.criterion(predictions, targets)
                 else:
+                    # Standard precision
                     outputs = self.model(images, metadata)
                     predictions = outputs['predictions']
                     loss = self.criterion(predictions, targets)
@@ -526,8 +574,14 @@ class ModelTrainer:
             'training_history': self.training_history
         }
         
+        # Use experiment manager directory if available
+        if self.experiment_manager:
+            checkpoint_dir = self.experiment_manager.get_model_artifacts_dir()
+        else:
+            checkpoint_dir = self.config.logging.checkpoint_dir
+        
         checkpoint_path = os.path.join(
-            self.config.logging.checkpoint_dir,
+            checkpoint_dir,
             f'checkpoint_epoch_{epoch}.pth'
         )
         
@@ -536,7 +590,7 @@ class ModelTrainer:
         # Keep only the best checkpoint if specified
         if self.config.logging.save_best_only:
             best_checkpoint_path = os.path.join(
-                self.config.logging.checkpoint_dir,
+                checkpoint_dir,
                 'best_checkpoint.pth'
             )
             if val_loss < self.best_val_loss:
@@ -544,16 +598,28 @@ class ModelTrainer:
     
     def _save_best_model(self):
         """Save the best model."""
+        # Use experiment manager directory if available
+        if self.experiment_manager:
+            model_dir = self.experiment_manager.get_model_artifacts_dir()
+        else:
+            model_dir = self.config.logging.checkpoint_dir
+        
         best_model_path = os.path.join(
-            self.config.logging.checkpoint_dir,
+            model_dir,
             'best_model.pth'
         )
         torch.save(self.model.state_dict(), best_model_path)
     
     def _load_best_model(self):
         """Load the best model."""
+        # Use experiment manager directory if available
+        if self.experiment_manager:
+            model_dir = self.experiment_manager.get_model_artifacts_dir()
+        else:
+            model_dir = self.config.logging.checkpoint_dir
+        
         best_model_path = os.path.join(
-            self.config.logging.checkpoint_dir,
+            model_dir,
             'best_model.pth'
         )
         if os.path.exists(best_model_path):

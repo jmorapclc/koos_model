@@ -291,14 +291,16 @@ class ModelEvaluator:
     Comprehensive model evaluator with visualization capabilities.
     """
     
-    def __init__(self, config: Any):
+    def __init__(self, config: Any, experiment_manager=None):
         """
         Initialize model evaluator.
         
         Args:
             config: Configuration object
+            experiment_manager: Experiment manager for output directories
         """
         self.config = config
+        self.experiment_manager = experiment_manager
         self.metrics_calculator = RegressionMetrics(config)
         
     def evaluate_model(
@@ -392,8 +394,12 @@ class ModelEvaluator:
         # Combine dataframes
         combined_df = pd.concat([df, metadata_df], axis=1)
         
-        # Save to CSV
-        output_file = f"{self.config.data.output_dir}/predictions.csv"
+        # Use experiment manager directory if available
+        if self.experiment_manager:
+            output_file = self.experiment_manager.get_experiment_dir() / "predictions.csv"
+        else:
+            output_file = f"{self.config.data.output_dir}/predictions.csv"
+        
         combined_df.to_csv(output_file, index=False)
         logger.info(f"Predictions saved to {output_file}")
     

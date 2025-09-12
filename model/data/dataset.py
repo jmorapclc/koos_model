@@ -310,19 +310,36 @@ class KOOSDataModule:
         logger.info(f"Created datasets - Train: {len(self.train_dataset)}, "
                    f"Val: {len(self.val_dataset)}, Test: {len(self.test_dataset)}")
     
-    def get_dataloaders(self) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    def get_dataloaders(self, device_optimizations: dict = None) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
-        Get data loaders for train, validation, and test sets.
+        Get data loaders for train, validation, and test sets with device-specific optimizations.
         
+        Args:
+            device_optimizations: Device-specific optimization settings
+            
         Returns:
             Tuple of (train_loader, val_loader, test_loader)
         """
+        # Use device optimizations if provided, otherwise use config defaults
+        if device_optimizations:
+            num_workers = device_optimizations.get('num_workers', self.config.data.num_workers)
+            pin_memory = device_optimizations.get('pin_memory', self.config.data.pin_memory)
+            persistent_workers = device_optimizations.get('persistent_workers', False)
+            prefetch_factor = device_optimizations.get('prefetch_factor', 2) if persistent_workers else None
+        else:
+            num_workers = self.config.data.num_workers
+            pin_memory = self.config.data.pin_memory
+            persistent_workers = False
+            prefetch_factor = None
+        
         train_loader = DataLoader(
             self.train_dataset,
             batch_size=self.config.data.batch_size,
             shuffle=True,
-            num_workers=self.config.data.num_workers,
-            pin_memory=self.config.data.pin_memory,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
             drop_last=True
         )
         
@@ -330,8 +347,10 @@ class KOOSDataModule:
             self.val_dataset,
             batch_size=self.config.data.batch_size,
             shuffle=False,
-            num_workers=self.config.data.num_workers,
-            pin_memory=self.config.data.pin_memory,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
             drop_last=False
         )
         
@@ -339,8 +358,10 @@ class KOOSDataModule:
             self.test_dataset,
             batch_size=self.config.data.batch_size,
             shuffle=False,
-            num_workers=self.config.data.num_workers,
-            pin_memory=self.config.data.pin_memory,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
             drop_last=False
         )
         

@@ -47,22 +47,123 @@ def count_parameters(model: torch.nn.Module) -> int:
 
 def get_device() -> torch.device:
     """
-    Get the best available device.
+    Get the best available device with proper detection and optimization.
     
     Returns:
         PyTorch device
     """
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        logger.info(f"Using CUDA device: {torch.cuda.get_device_name()}")
+        gpu_name = torch.cuda.get_device_name()
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        logger.info(f"Using CUDA device: {gpu_name}")
+        logger.info(f"GPU Memory: {gpu_memory:.2f} GB")
+        
+        # Set CUDA optimizations
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+        
+        # Clear GPU cache
+        torch.cuda.empty_cache()
+        
     elif torch.backends.mps.is_available():
         device = torch.device("mps")
-        logger.info("Using MPS device")
+        logger.info("Using MPS device (Apple Silicon)")
+        
+        # MPS-specific optimizations
+        torch.backends.mps.allow_tf32 = True
+        
     else:
         device = torch.device("cpu")
         logger.info("Using CPU device")
     
     return device
+
+def get_device_info() -> dict:
+    """
+    Get detailed device information.
+    
+    Returns:
+        dict: Device information including capabilities and memory
+    """
+    info = {
+        'device_type': 'cpu',
+        'device_name': 'CPU',
+        'memory_total': 0,
+        'memory_allocated': 0,
+        'memory_reserved': 0,
+        'compute_capability': None,
+        'cuda_available': torch.cuda.is_available(),
+        'mps_available': torch.backends.mps.is_available()
+    }
+    
+    if torch.cuda.is_available():
+        info['device_type'] = 'cuda'
+        info['device_name'] = torch.cuda.get_device_name()
+        info['memory_total'] = torch.cuda.get_device_properties(0).total_memory
+        info['memory_allocated'] = torch.cuda.memory_allocated()
+        info['memory_reserved'] = torch.cuda.memory_reserved()
+        info['compute_capability'] = torch.cuda.get_device_capability()
+        
+    elif torch.backends.mps.is_available():
+        info['device_type'] = 'mps'
+        info['device_name'] = 'Apple Silicon M-series'
+        # MPS doesn't expose memory info directly
+        info['memory_total'] = 0
+        info['memory_allocated'] = 0
+        info['memory_reserved'] = 0
+        
+    return info
+
+def optimize_for_device(device: torch.device) -> dict:
+    """
+    Apply device-specific optimizations.
+    
+    Args:
+        device: The device to optimize for
+        
+    Returns:
+        dict: Optimization settings applied
+    """
+    optimizations = {
+        'mixed_precision': True,
+        'pin_memory': True,
+        'num_workers': 4,
+        'persistent_workers': True
+    }
+    
+    if device.type == 'cuda':
+        # CUDA optimizations
+        optimizations.update({
+            'mixed_precision': True,
+            'pin_memory': True,
+            'num_workers': min(8, torch.cuda.device_count() * 2),
+            'persistent_workers': True,
+            'prefetch_factor': 2
+        })
+        
+        # Set CUDA memory management
+        torch.cuda.empty_cache()
+        
+    elif device.type == 'mps':
+        # MPS optimizations (Apple Silicon)
+        optimizations.update({
+            'mixed_precision': True,  # MPS supports mixed precision
+            'pin_memory': False,      # MPS doesn't benefit from pin_memory
+            'num_workers': 0,         # MPS works better with single-threaded data loading
+            'persistent_workers': False
+        })
+        
+    else:
+        # CPU optimizations
+        optimizations.update({
+            'mixed_precision': False,
+            'pin_memory': False,
+            'num_workers': min(4, os.cpu_count() or 1),
+            'persistent_workers': False
+        })
+    
+    return optimizations
 
 def save_config(config: Any, filepath: str):
     """
