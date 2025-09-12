@@ -1,0 +1,10 @@
+# DCM File Processor Requirements
+# No external dependencies required - uses only Python standard library
+# Python 3.6+ required
+
+# Optional: For better CSV handling and data analysis
+# pandas>=1.0.0
+# numpy>=1.18.0
+
+# Optional: For DICOM file validation
+# pydicom>=2.0.0
