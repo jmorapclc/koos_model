@@ -9,6 +9,9 @@ Modify these settings as needed for your environment.
 # Source directory containing the DCM files
 SOURCE_PATH = "/Volumes/MGB-CRE3-IRB2024P000937"
 
+# Local directory containing already renamed image files
+LOCAL_DCM_FILE_PATH = "./img_repo"
+
 # Input CSV file path (relative to script location)
 CSV_FILE = "data/HALS_Dataset_v1.csv"
 
