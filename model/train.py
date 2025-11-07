@@ -15,7 +15,7 @@ import shutil
 from pathlib import Path
 import torch
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Add model directory to path
 sys.path.append(str(Path(__file__).parent))
@@ -136,7 +136,8 @@ def train_model(
     data_module: KOOSDataModule,
     config: Config,
     experiment_manager: ExperimentManager,
-    device_optimizations: dict = None
+    device_optimizations: dict = None,
+    resume_from_checkpoint: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Train the model with device-specific optimizations.
@@ -147,6 +148,7 @@ def train_model(
         config: Configuration object
         experiment_manager: Experiment manager for output directories
         device_optimizations: Device-specific optimization settings
+        resume_from_checkpoint: Path to checkpoint file to resume from
         
     Returns:
         Training results
@@ -160,8 +162,8 @@ def train_model(
     # Create trainer with experiment manager
     trainer = ModelTrainer(config, experiment_manager)
     
-    # Setup training
-    trainer.setup_training(model, train_loader, val_loader)
+    # Setup training (with optional checkpoint resume)
+    trainer.setup_training(model, train_loader, val_loader, resume_from_checkpoint)
     
     # Train model
     training_results = trainer.train(train_loader, val_loader, test_loader)
@@ -300,6 +302,32 @@ def save_results(
         except Exception as e:
             logger.warning(f"Failed to copy HDF5 file: {e}")
     
+    # Create highly compressed archive of entire experiment directory
+    try:
+        import zipfile
+        experiment_dir = experiment_manager.get_experiment_dir()
+        archive_path = experiment_dir.parent / f"{experiment_manager.experiment_id}.zip"
+        
+        logger.info(f"Creating compressed archive: {archive_path}")
+        
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
+            # Walk through all files in the experiment directory
+            for root, dirs, files in os.walk(experiment_dir):
+                # Skip .DS_Store files and hidden directories
+                files = [f for f in files if not f.endswith('.DS_Store')]
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                
+                for file in files:
+                    file_path = Path(root) / file
+                    # Create archive path preserving experiment directory structure
+                    arcname = file_path.relative_to(experiment_dir.parent)
+                    zipf.write(file_path, arcname, compress_type=zipfile.ZIP_DEFLATED)
+        
+        archive_size_mb = archive_path.stat().st_size / (1024 * 1024)
+        logger.info(f"Created compressed archive: {archive_path} ({archive_size_mb:.2f} MB)")
+    except Exception as e:
+        logger.warning(f"Failed to create compressed archive: {e}")
+    
     logger.info(f"Results saved to {experiment_manager.get_experiment_dir()}")
 
 def main():
@@ -314,6 +342,7 @@ def main():
     parser.add_argument('--learning_rate', type=float, default=None, help='Learning rate')
     parser.add_argument('--device', type=str, default='auto', help='Device to use')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint file to resume training from')
     
     args = parser.parse_args()
     
@@ -375,9 +404,64 @@ def main():
             logger.info(f"  {key}: {value}")
         logger.info("="*60)
         
+        # Handle resume from checkpoint - determine experiment directory
+        resume_checkpoint = None
+        experiment_dir_from_checkpoint = None
+        
+        if args.resume:
+            resume_checkpoint = args.resume
+            logger.info(f"Resuming training from checkpoint: {resume_checkpoint}")
+            # Extract experiment directory from checkpoint path
+            checkpoint_path = Path(resume_checkpoint)
+            # Checkpoint is typically in: outputs/EXPERIMENT_ID/model_artifacts/checkpoint.pth
+            if 'model_artifacts' in checkpoint_path.parts:
+                # Find the experiment directory (parent of model_artifacts)
+                parts = checkpoint_path.parts
+                artifacts_idx = parts.index('model_artifacts')
+                if artifacts_idx > 0:
+                    # Reconstruct path up to experiment directory
+                    base_dir = Path(*parts[:parts.index('outputs') + 1])
+                    exp_id = parts[parts.index('outputs') + 1]
+                    experiment_dir_from_checkpoint = base_dir / exp_id
+                    logger.info(f"Found experiment directory from checkpoint: {experiment_dir_from_checkpoint}")
+        else:
+            # Try to find the latest checkpoint in any existing experiment
+            output_dir = Path(config.data.output_dir)
+            if output_dir.exists():
+                # Find all experiment directories
+                experiment_dirs = sorted([d for d in output_dir.iterdir() if d.is_dir()], reverse=True)
+                for exp_dir in experiment_dirs:
+                    artifacts_dir = exp_dir / 'model_artifacts'
+                    if artifacts_dir.exists():
+                        # Check for best_checkpoint first, then latest epoch checkpoint
+                        best_checkpoint = artifacts_dir / 'best_checkpoint.pth'
+                        if best_checkpoint.exists():
+                            resume_checkpoint = str(best_checkpoint)
+                            experiment_dir_from_checkpoint = exp_dir
+                            logger.info(f"Found best checkpoint, resuming from: {resume_checkpoint}")
+                            break
+                        else:
+                            # Find latest epoch checkpoint
+                            epoch_checkpoints = sorted(artifacts_dir.glob('checkpoint_epoch_*.pth'))
+                            if epoch_checkpoints:
+                                resume_checkpoint = str(epoch_checkpoints[-1])
+                                experiment_dir_from_checkpoint = exp_dir
+                                logger.info(f"Found latest checkpoint, resuming from: {resume_checkpoint}")
+                                break
+        
         # Create experiment manager
-        experiment_manager = ExperimentManager(config.data.output_dir)
-        logger.info(f"Created experiment: {experiment_manager.experiment_id}")
+        # If resuming, try to use the same experiment directory
+        if experiment_dir_from_checkpoint and experiment_dir_from_checkpoint.exists():
+            # Use existing experiment directory
+            experiment_manager = ExperimentManager(config.data.output_dir)
+            # Override the experiment directory to use the existing one
+            experiment_manager.experiment_dir = experiment_dir_from_checkpoint
+            experiment_manager.experiment_id = experiment_dir_from_checkpoint.name
+            logger.info(f"Resuming experiment: {experiment_manager.experiment_id}")
+        else:
+            # Create new experiment
+            experiment_manager = ExperimentManager(config.data.output_dir)
+            logger.info(f"Created new experiment: {experiment_manager.experiment_id}")
         
         # Load data with device optimizations
         data_module = load_data(config, device_optimizations)
@@ -386,7 +470,7 @@ def main():
         model = create_model(config)
         
         # Train model with device optimizations
-        training_results = train_model(model, data_module, config, experiment_manager, device_optimizations)
+        training_results = train_model(model, data_module, config, experiment_manager, device_optimizations, resume_checkpoint)
         
         # Evaluate model with device optimizations
         evaluation_results = evaluate_model(model, data_module, config, experiment_manager, device_optimizations)

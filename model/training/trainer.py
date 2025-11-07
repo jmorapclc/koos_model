@@ -9,6 +9,7 @@ training loops, validation, checkpointing, and monitoring.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -260,7 +261,8 @@ class ModelTrainer:
         self, 
         model: nn.Module,
         train_loader: DataLoader,
-        val_loader: DataLoader
+        val_loader: DataLoader,
+        resume_from_checkpoint: Optional[str] = None
     ):
         """
         Setup training components.
@@ -269,6 +271,7 @@ class ModelTrainer:
             model: Model to train
             train_loader: Training data loader
             val_loader: Validation data loader
+            resume_from_checkpoint: Path to checkpoint file to resume from
         """
         self.model = model.to(self.device)
         self.optimizer = self._create_optimizer(self.model)
@@ -292,6 +295,12 @@ class ModelTrainer:
                 logger.info("Mixed precision not supported on CPU")
         else:
             self.scaler = None
+        
+        # Load checkpoint if provided
+        self.start_epoch = 0
+        if resume_from_checkpoint:
+            self.start_epoch = self.load_checkpoint(resume_from_checkpoint)
+            logger.info(f"Resuming training from epoch {self.start_epoch + 1}")
         
         logger.info(f"Training setup complete. Model has {sum(p.numel() for p in self.model.parameters()):,} parameters")
     
@@ -480,7 +489,10 @@ class ModelTrainer:
         
         start_time = time.time()
         
-        for epoch in range(self.config.training.num_epochs):
+        # Start from the resume epoch if checkpoint was loaded
+        start_epoch = getattr(self, 'start_epoch', 0)
+        
+        for epoch in range(start_epoch, self.config.training.num_epochs):
             epoch_start_time = time.time()
             
             # Training
@@ -502,9 +514,10 @@ class ModelTrainer:
             # Log metrics
             self._log_metrics(epoch, train_metrics, val_metrics)
             
-            # Save checkpoint
+            # Save checkpoint (respect save_frequency)
             if self.config.logging.save_checkpoints:
-                self._save_checkpoint(epoch, val_metrics['loss'])
+                if (epoch + 1) % self.config.logging.save_frequency == 0 or epoch == 0:
+                    self._save_checkpoint(epoch, val_metrics['loss'])
             
             # Early stopping check
             if self.early_stopping(val_metrics['loss'], self.model):
@@ -528,6 +541,15 @@ class ModelTrainer:
         
         total_time = time.time() - start_time
         logger.info(f"Training completed in {total_time:.2f} seconds")
+        
+        # Final cleanup: remove all intermediate checkpoints, keep only best
+        if self.config.logging.save_best_only:
+            if self.experiment_manager:
+                checkpoint_dir = Path(self.experiment_manager.get_model_artifacts_dir())
+            else:
+                checkpoint_dir = Path(self.config.logging.checkpoint_dir)
+            self._cleanup_old_checkpoints(checkpoint_dir, keep_last_n=0)
+            logger.info("Cleaned up intermediate checkpoints, kept only best model and checkpoint")
         
         # Load best model
         self._load_best_model()
@@ -567,7 +589,7 @@ class ModelTrainer:
             })
     
     def _save_checkpoint(self, epoch: int, val_loss: float):
-        """Save model checkpoint."""
+        """Save model checkpoint with automatic cleanup of old checkpoints."""
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -576,27 +598,58 @@ class ModelTrainer:
             'training_history': self.training_history
         }
         
+        # Save scheduler state if available
+        if self.scheduler.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.scheduler.state_dict()
+        
+        # Save scaler state if available
+        if self.scaler is not None:
+            checkpoint['scaler_state_dict'] = self.scaler.state_dict()
+        
         # Use experiment manager directory if available
         if self.experiment_manager:
-            checkpoint_dir = self.experiment_manager.get_model_artifacts_dir()
+            checkpoint_dir = Path(self.experiment_manager.get_model_artifacts_dir())
         else:
-            checkpoint_dir = self.config.logging.checkpoint_dir
+            checkpoint_dir = Path(self.config.logging.checkpoint_dir)
         
-        checkpoint_path = os.path.join(
-            checkpoint_dir,
-            f'checkpoint_epoch_{epoch}.pth'
-        )
-        
+        checkpoint_path = checkpoint_dir / f'checkpoint_epoch_{epoch}.pth'
         torch.save(checkpoint, checkpoint_path)
         
-        # Keep only the best checkpoint if specified
+        # Save best checkpoint if this is the best so far
+        if val_loss < self.best_val_loss:
+            best_checkpoint_path = checkpoint_dir / 'best_checkpoint.pth'
+            torch.save(checkpoint, best_checkpoint_path)
+        
+        # Cleanup old checkpoints if save_best_only is enabled
         if self.config.logging.save_best_only:
-            best_checkpoint_path = os.path.join(
-                checkpoint_dir,
-                'best_checkpoint.pth'
+            self._cleanup_old_checkpoints(checkpoint_dir, keep_last_n=1)
+    
+    def _cleanup_old_checkpoints(self, checkpoint_dir: Path, keep_last_n: int = 1):
+        """
+        Remove old checkpoint files, keeping only essential ones.
+        
+        Args:
+            checkpoint_dir: Directory containing checkpoints
+            keep_last_n: Number of recent checkpoints to keep (in addition to best)
+        """
+        try:
+            # Find all epoch checkpoint files
+            checkpoint_files = sorted(
+                checkpoint_dir.glob('checkpoint_epoch_*.pth'),
+                key=lambda x: int(x.stem.split('_')[-1])
             )
-            if val_loss < self.best_val_loss:
-                torch.save(checkpoint, best_checkpoint_path)
+            
+            # Keep only the last N checkpoints (excluding best)
+            if len(checkpoint_files) > keep_last_n:
+                files_to_remove = checkpoint_files[:-keep_last_n]
+                for file in files_to_remove:
+                    try:
+                        file.unlink()
+                        logger.debug(f"Removed old checkpoint: {file.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove checkpoint {file.name}: {e}")
+        except Exception as e:
+            logger.warning(f"Error during checkpoint cleanup: {e}")
     
     def _save_best_model(self):
         """Save the best model."""
@@ -611,6 +664,54 @@ class ModelTrainer:
             'best_model.pth'
         )
         torch.save(self.model.state_dict(), best_model_path)
+    
+    def load_checkpoint(self, checkpoint_path: str) -> int:
+        """
+        Load checkpoint and restore training state.
+        
+        Args:
+            checkpoint_path: Path to checkpoint file
+            
+        Returns:
+            Epoch number to resume from
+        """
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        
+        logger.info(f"Loading checkpoint from: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        # Load model state
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load optimizer state
+        if 'optimizer_state_dict' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        
+        # Load training history
+        if 'training_history' in checkpoint:
+            self.training_history = checkpoint['training_history']
+        
+        # Load best validation loss
+        if 'val_loss' in checkpoint:
+            self.best_val_loss = checkpoint['val_loss']
+        
+        # Get epoch number (0-indexed, so we resume from epoch + 1)
+        start_epoch = checkpoint.get('epoch', 0)
+        
+        # Load scheduler state if available
+        if 'scheduler_state_dict' in checkpoint and self.scheduler.scheduler is not None:
+            self.scheduler.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # Load scaler state if available
+        if 'scaler_state_dict' in checkpoint and self.scaler is not None:
+            self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        
+        logger.info(f"Checkpoint loaded successfully. Resuming from epoch {start_epoch + 1}")
+        logger.info(f"Best validation loss so far: {self.best_val_loss:.4f}")
+        
+        return start_epoch
     
     def _load_best_model(self):
         """Load the best model."""
