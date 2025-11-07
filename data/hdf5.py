@@ -83,7 +83,7 @@ class HDF5Builder:
     
     def _extract_metadata_features(self, row: pd.Series) -> np.ndarray:
         """
-        Extract numerical features from metadata row.
+        numerical features from metadata row.
         Normalizes continuous variables to [0, 1] range.
         
         Args:
@@ -239,7 +239,7 @@ def main():
                        help='Directory containing input files')
     parser.add_argument('--csv_file', type=str, default='data/HALS_Dataset_v1.csv',
                        help='Path to metadata CSV')
-    parser.add_argument('--output', type=str, default='data/koos_dataset.h5',
+    parser.add_argument('--output', type=str, default='data/koos.h5',
                        help='Output path for binary format')
     parser.add_argument('--image_size', type=int, default=224,
                        help='Target image size')

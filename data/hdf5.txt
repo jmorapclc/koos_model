@@ -1,0 +1,1 @@
+python data/hdf5.py --image_dir data/img_repo --csv_file data/HALS_Dataset_v1.csv --output data/koos.h5
