@@ -273,6 +273,10 @@ Mixed Precision: {config.system.mixed_precision}
 
 Data Configuration:
 ------------------
+Data Source: {('Binary PyTorch optimized format' if os.path.exists(config.data.hdf5_file) else 'Individual files')}
+HDF5 File: {(config.data.hdf5_file if os.path.exists(config.data.hdf5_file) else 'N/A')}
+CSV File: {(config.data.csv_file if not os.path.exists(config.data.hdf5_file) else 'N/A')}
+Image Directory: {(config.data.image_dir if not os.path.exists(config.data.hdf5_file) else 'N/A')}
 Train Ratio: {config.data.train_ratio}
 Validation Ratio: {config.data.val_ratio}
 Test Ratio: {config.data.test_ratio}
@@ -326,6 +330,24 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             model: Trained model
             training_time: Training time in seconds
         """
+        # Get HDF5 file information if it exists
+        hdf5_info = {}
+        if os.path.exists(config.data.hdf5_file):
+            try:
+                import h5py
+                with h5py.File(config.data.hdf5_file, 'r') as hf:
+                    hdf5_info = {
+                        'file_path': config.data.hdf5_file,
+                        'file_size_mb': os.path.getsize(config.data.hdf5_file) / (1024**2),
+                        'num_samples': int(hf.attrs.get('num_samples', 0)),
+                        'image_shape': list(hf.attrs.get('image_shape', [])),
+                        'bit_depth': int(hf.attrs.get('bit_depth', 8)),
+                        'compression_level': int(hf.attrs.get('compression_level', 9))
+                    }
+            except Exception as e:
+                logger.warning(f"Could not read HDF5 file info: {e}")
+                hdf5_info = {'file_path': config.data.hdf5_file, 'error': str(e)}
+        
         # Update metadata with final information
         self.update_metadata(
             end_time=datetime.now().isoformat(),
@@ -333,7 +355,8 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             training_time_formatted=f"{int(training_time//3600):02d}:{int((training_time%3600)//60):02d}:{int(training_time%60):02d}",
             config=config.to_dict(),
             system_info=self.get_system_info(),
-            model_info=self.get_model_info(model)
+            model_info=self.get_model_info(model),
+            hdf5_info=hdf5_info if hdf5_info else None
         )
         
         # Save metadata

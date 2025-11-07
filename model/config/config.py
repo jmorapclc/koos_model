@@ -18,6 +18,7 @@ class DataConfig:
     # Paths
     image_dir: str = "data/img_repo"
     csv_file: str = "data/HALS_Dataset_v1.csv"
+    hdf5_file: str = "data/koos_dataset.h5"  # Binary PyTorch optimized format
     output_dir: str = "model/outputs"
     
     # Image preprocessing

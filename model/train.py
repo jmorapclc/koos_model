@@ -11,6 +11,7 @@ import os
 import sys
 import argparse
 import logging
+import shutil
 from pathlib import Path
 import torch
 import numpy as np
@@ -74,13 +75,27 @@ def load_data(config: Config, device_optimizations: dict = None) -> KOOSDataModu
     logger = logging.getLogger(__name__)
     logger.info("Loading data...")
     
+    # Check if HDF5 binary format exists, otherwise fall back to individual files
+    hdf5_file = None
+    csv_file = None
+    image_dir = None
+    
+    if os.path.exists(config.data.hdf5_file):
+        hdf5_file = config.data.hdf5_file
+        logger.info(f"Using binary PyTorch optimized format: {hdf5_file}")
+    else:
+        csv_file = config.data.csv_file
+        image_dir = config.data.image_dir
+        logger.info(f"Using individual files: CSV={csv_file}, ImageDir={image_dir}")
+    
     # Create augmentation pipelines
     augmentation_pipelines = create_augmentation_pipelines(config)
     
     # Create data module
     data_module = KOOSDataModule(
-        csv_file=config.data.csv_file,
-        image_dir=config.data.image_dir,
+        csv_file=csv_file,
+        image_dir=image_dir,
+        hdf5_file=hdf5_file,
         config=config,
         augmentations=augmentation_pipelines
     )
@@ -275,6 +290,15 @@ def save_results(
     experiment_manager.save_experiment_metadata(
         config, model, training_time
     )
+    
+    # Copy HDF5 file to experiment directory if it exists
+    if os.path.exists(config.data.hdf5_file):
+        hdf5_dest = results_dir / os.path.basename(config.data.hdf5_file)
+        try:
+            shutil.copy2(config.data.hdf5_file, hdf5_dest)
+            logger.info(f"Copied HDF5 file to experiment directory: {hdf5_dest}")
+        except Exception as e:
+            logger.warning(f"Failed to copy HDF5 file: {e}")
     
     logger.info(f"Results saved to {experiment_manager.get_experiment_dir()}")
 

@@ -14,6 +14,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import cv2
+import h5py
+import json
 from typing import Tuple, Dict, Any, Optional, List
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -26,12 +28,14 @@ class KOOSDataset(Dataset):
     PyTorch Dataset for KOOS-PS prediction.
     
     Loads X-ray images and associated metadata for regression task.
+    Supports both HDF5 binary format and individual image files.
     """
     
     def __init__(
         self,
-        csv_file: str,
-        image_dir: str,
+        csv_file: Optional[str] = None,
+        image_dir: Optional[str] = None,
+        hdf5_file: Optional[str] = None,
         image_size: int = 224,
         augmentations: Optional[A.Compose] = None,
         is_training: bool = True,
@@ -42,8 +46,9 @@ class KOOSDataset(Dataset):
         Initialize the dataset.
         
         Args:
-            csv_file: Path to CSV file with metadata
-            image_dir: Directory containing images
+            csv_file: Path to CSV file with metadata (if not using HDF5)
+            image_dir: Directory containing images (if not using HDF5)
+            hdf5_file: Path to HDF5 binary format file (preferred)
             image_size: Target image size for resizing
             augmentations: Albumentations augmentation pipeline
             is_training: Whether this is training data
@@ -52,6 +57,7 @@ class KOOSDataset(Dataset):
         """
         self.csv_file = csv_file
         self.image_dir = image_dir
+        self.hdf5_file = hdf5_file
         self.image_size = image_size
         self.augmentations = augmentations
         self.is_training = is_training
@@ -60,13 +66,25 @@ class KOOSDataset(Dataset):
         self.normalize_mean = normalize_mean or [0.485, 0.456, 0.406]
         self.normalize_std = normalize_std or [0.229, 0.224, 0.225]
         
-        # Load metadata
-        self.df = self._load_metadata()
-        
-        # Filter valid samples
-        self.valid_samples = self._filter_valid_samples()
-        
-        logger.info(f"Loaded {len(self.valid_samples)} valid samples from {csv_file}")
+        # Initialize based on data source
+        if hdf5_file and os.path.exists(hdf5_file):
+            self.use_hdf5 = True
+            self._load_hdf5()
+        elif csv_file and image_dir:
+            self.use_hdf5 = False
+            # Load metadata
+            self.df = self._load_metadata()
+            # Filter valid samples
+            self.valid_samples = self._filter_valid_samples()
+            logger.info(f"Loaded {len(self.valid_samples)} valid samples from {csv_file}")
+        else:
+            raise ValueError("Must provide either (csv_file, image_dir) or hdf5_file")
+    
+    def _load_hdf5(self):
+        """Load dataset from HDF5 binary format."""
+        self.hdf5_handle = h5py.File(self.hdf5_file, 'r')
+        self.length = self.hdf5_handle.attrs['num_samples']
+        logger.info(f"Loaded {self.length} samples from HDF5 binary format: {self.hdf5_file}")
     
     def _load_metadata(self) -> pd.DataFrame:
         """Load metadata from CSV file."""
@@ -200,6 +218,8 @@ class KOOSDataset(Dataset):
     
     def __len__(self) -> int:
         """Return number of valid samples."""
+        if self.use_hdf5:
+            return self.length
         return len(self.valid_samples)
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
@@ -212,30 +232,76 @@ class KOOSDataset(Dataset):
         Returns:
             Dictionary containing image, metadata, and target
         """
-        sample = self.valid_samples[idx]
-        
-        # Load image
-        image = self._load_image(sample['image_path'])
-        
-        # Apply augmentations if provided
-        if self.augmentations is not None:
-            augmented = self.augmentations(image=image)
-            image = augmented['image']
+        if self.use_hdf5:
+            # Load from HDF5
+            image = self.hdf5_handle['images'][idx]
+            metadata = torch.from_numpy(self.hdf5_handle['metadata'][idx])
+            target = torch.tensor(self.hdf5_handle['targets'][idx], dtype=torch.float32)
+            hals_mrn = self.hdf5_handle['hals_mrn'][idx].decode('utf-8')
+            
+            # Convert image to tensor format
+            image = torch.from_numpy(image).permute(2, 0, 1).float()
+            
+            # Normalize based on bit depth
+            if self.hdf5_handle.attrs['bit_depth'] == 8:
+                image = image / 255.0
+            else:
+                max_val = (2 ** self.hdf5_handle.attrs['bit_depth']) - 1
+                image = image / max_val
+            
+            # Apply augmentations if provided
+            if self.augmentations is not None:
+                image_np = image.permute(1, 2, 0).numpy()
+                augmented = self.augmentations(image=image_np)
+                image = augmented['image']
+            else:
+                # Normalize with ImageNet stats
+                image = torch.nn.functional.normalize(
+                    image, 
+                    mean=self.normalize_mean, 
+                    std=self.normalize_std
+                )
+            
+            return {
+                'image': image,
+                'metadata': metadata,
+                'target': target,
+                'hals_mrn': hals_mrn
+            }
         else:
-            # Convert to tensor and normalize
-            image = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
-            image = torch.nn.functional.normalize(
-                image, 
-                mean=self.normalize_mean, 
-                std=self.normalize_std
-            )
-        
-        return {
-            'image': image,
-            'metadata': sample['metadata'],
-            'target': torch.tensor(sample['target'], dtype=torch.float32),
-            'hals_mrn': sample['hals_mrn']
-        }
+            # Load from individual files
+            sample = self.valid_samples[idx]
+            
+            # Load image
+            image = self._load_image(sample['image_path'])
+            
+            # Apply augmentations if provided
+            if self.augmentations is not None:
+                augmented = self.augmentations(image=image)
+                image = augmented['image']
+            else:
+                # Convert to tensor and normalize
+                image = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
+                image = torch.nn.functional.normalize(
+                    image, 
+                    mean=self.normalize_mean, 
+                    std=self.normalize_std
+                )
+            
+            return {
+                'image': image,
+                'metadata': sample['metadata'],
+                'target': torch.tensor(sample['target'], dtype=torch.float32),
+                'hals_mrn': sample['hals_mrn']
+            }
+    
+    def __del__(self):
+        """Close HDF5 file handle if it exists."""
+        if hasattr(self, 'use_hdf5') and self.use_hdf5 and hasattr(self, 'hdf5_handle'):
+            try:
+                self.hdf5_handle.close()
+            except:
+                pass
 
 class KOOSDataModule:
     """
@@ -244,22 +310,25 @@ class KOOSDataModule:
     
     def __init__(
         self,
-        csv_file: str,
-        image_dir: str,
-        config: Any,
+        csv_file: Optional[str] = None,
+        image_dir: Optional[str] = None,
+        hdf5_file: Optional[str] = None,
+        config: Any = None,
         augmentations: Optional[Dict[str, A.Compose]] = None
     ):
         """
         Initialize data module.
         
         Args:
-            csv_file: Path to CSV file
-            image_dir: Directory containing images
+            csv_file: Path to CSV file (if not using HDF5)
+            image_dir: Directory containing images (if not using HDF5)
+            hdf5_file: Path to HDF5 binary format file (preferred)
             config: Configuration object
             augmentations: Dictionary of augmentation pipelines
         """
         self.csv_file = csv_file
         self.image_dir = image_dir
+        self.hdf5_file = hdf5_file
         self.config = config
         self.augmentations = augmentations or {}
         
@@ -276,6 +345,7 @@ class KOOSDataModule:
         full_dataset = KOOSDataset(
             csv_file=self.csv_file,
             image_dir=self.image_dir,
+            hdf5_file=self.hdf5_file,
             image_size=self.config.data.image_size,
             augmentations=None,  # Will be set per split
             is_training=True,
