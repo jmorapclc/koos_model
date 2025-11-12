@@ -1,7 +1,7 @@
 I. Classic Books
 
-1. Goodfellow, I.; Bengio, Y.; Courville, A. Deep Learning. The MIT Press: Cambridge, MA, USA, 2016.
-2. Prince, S. J. D. Understanding Deep Learning. The MIT Press: Cambridge, MA, USA, 2023.
+1. Goodfellow, I.; Bengio, Y.; Courville, A. Deep Learning. The MIT Press: Cambridge, MA, USA, 2016.  https://www.deeplearningbook.org/
+2. Prince, S. J. D. Understanding Deep Learning. The MIT Press: Cambridge, MA, USA, 2023. https://udlbook.github.io/udlbook/
 
 II. Scientific publications.
 
